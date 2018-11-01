@@ -5,6 +5,21 @@ import core.backend
 RPN_FG_FRACTION = 0.5
 RPN_BATCHSIZE = 256
 
+def matmul(*args, **kwargs):
+	return tensorflow.matmul(*args, **kwargs)
+
+def range(*args, **kwargs):
+	return tensorflow.range(*args, **kwargs)
+
+def gather_nd(params, indices):
+	return tensorflow.gather_nd(params, indices)
+
+def meshgrid(*args, **kwargs):
+	return tensorflow.meshgrid(*args, **kwargs)
+
+def where(condition, x=None, y=None):
+	return tensorflow.where(condition, x, y)
+
 def shuffle(x):
 	"""
 	Modify a sequence by shuffling its contents. This function only shuffles
@@ -42,12 +57,11 @@ def bbox_transform(ex_rois, gt_rois):
 
 	return keras.backend.cast(targets, 'float32')
 
-def overlapping(anchors, gt_boxes, inds_inside):
+def overlapping(anchors, gt_boxes):
 	"""
 	overlaps between the anchors and the gt boxes
 	:param anchors: Generated anchors
 	:param gt_boxes: Ground truth bounding boxes
-	:param inds_inside:
 	:return:
 	"""
 
@@ -60,7 +74,7 @@ def overlapping(anchors, gt_boxes, inds_inside):
 	argmax_overlaps_inds = keras.backend.argmax(reference, axis=1)
 
 	indices = keras.backend.stack([
-		tensorflow.range(keras.backend.shape(inds_inside)[0]),
+		tensorflow.range(keras.backend.shape(anchors)[0]),
 		keras.backend.cast(argmax_overlaps_inds, "int32")
 	], axis=0)
 

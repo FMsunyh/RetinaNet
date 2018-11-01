@@ -12,7 +12,39 @@ import keras_resnet.models
 from keras import Model
 from keras.layers import Conv2D, Conv2DTranspose, Add, Activation, Reshape, Concatenate
 
-from core.layers import AnchorTarget
+import keras
+
+from core.layers import AnchorTarget, FocalLoss
+import math
+
+def classification_subnet(num_classes=21, num_anchors=9, feature_size=256, prob_pi=0.01):
+    options = {
+        'kernel_initializer':keras.initializers.normal(mean=0.0, stddev=0.01, seed=None),
+        'bias_initializer':keras.initializers.zeros()
+    }
+
+    layers = []
+    for i in range(4):
+        layers.append(Conv2D(feature_size,(3,3),strides=1,padding='same', activation='relu',name='cls_{}'.format(i), **options))
+    layers.append(Conv2D(num_classes*num_anchors,(3,3),strides=1,padding='same',name='pyramid_classification'
+                         ,kernel_initializer=keras.initializers.zeros()
+                         ,bias_initializer=keras.initializers.constant(-math.log((1 - prob_pi) / prob_pi))
+                         ))
+
+    return layers
+
+def regression_subnet(num_anchors=9, feature_size=256):
+    options = {
+        'kernel_initializer':keras.initializers.normal(mean=0.0, stddev=0.01, seed=None),
+        'bias_initializer':keras.initializers.zeros()
+    }
+
+    layers = []
+    for i in range(4):
+        layers.append(Conv2D(feature_size, (3, 3), strides=1, padding='same', activation='relu',name='reg_{}'.format(i), **options))
+    layers.append(Conv2D(4 * num_anchors, (3, 3), strides=1, padding='same', name='pyramid_regression'))
+
+    return layers
 
 
 def compute_pyramid_features(res3, res4, res5, feature_size=256):
@@ -41,63 +73,65 @@ def compute_pyramid_features(res3, res4, res5, feature_size=256):
 
     return P3, P4, P5, P6, P7
 
-def classification_subnet(num_classes=21, num_anchors=9, feature_size=256):
-    layers = []
-    for i in range(4):
-        layers.append(Conv2D(feature_size,(3,3),strides=1,padding='same',name='cls_{}'.format(i)))
-    layers.append(Conv2D(num_classes*num_anchors,(3,3),strides=1,padding='same',name='pyramid_classification'))
-
-    return layers
-
-def regression_subnet(num_anchors=9, feature_size=256):
-    layers = []
-    for i in range(4):
-        layers.append(Conv2D(feature_size, (3, 3), strides=1, padding='same', name='reg_{}'.format(i)))
-    layers.append(Conv2D(4 * num_anchors, (3, 3), strides=1, padding='same', name='pyramid_regression'))
-
-    return layers
-
 def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwargs):
     image, im_info, gt_boxes = inputs
     num_anchors = 9
     _, res3, res4, res5 = backbone.outputs # ignore res2
 
-    # pyramid features
+    # compute pyramid features as per https://arxiv.org/abs/1708.02002
     pyramid_features = compute_pyramid_features(res3, res4, res5)
+    strides          = [8,  16,  32,  64, 128]
+    sizes            = [32, 64, 128, 256, 512]
+
+    # TODO: Remove this ... this skips the first pyramid level
+    pyramid_features = pyramid_features[1:]
+    strides = [16, 32, 64, 128]
+    sizes = [64, 128, 256, 512]
 
     # construct classification and regression subnets
     classification_layers = classification_subnet(num_classes=num_classes, num_anchors=num_anchors,feature_size=feature_size)
-    regression_layers     = regression_subnet(num_anchors=num_anchors, feature_size=feature_size)
+    # regression_layers     = regression_subnet(num_anchors=num_anchors, feature_size=feature_size)
 
     # for all pyramid levels, run classification and regression branch and compute anchors
-    classification = None
-    labels = None
-    regression = None
+    classification    = None
+    labels            = None
+    regression        = None
     regression_target = None
-    for i, p in enumerate(pyramid_features):
+    anchors           = None
+    
+    for i, (p, stride, size) in enumerate(zip(pyramid_features, strides, sizes)):
         # run the classification subnet
         cls = p
         for l in classification_layers:
             cls = l(cls)
 
         # compute labels and bbox_reg_targets
-        l, r = AnchorTarget(stride=16, name='boxes_{}'.format(i))([cls, im_info, gt_boxes])
-        labels = l if labels == None else Concatenate(axis=0)([labels, l])
-        regression_target = r if regression_target == None else Concatenate(axis=0)([regression_target, r])
+        lb, _, a          = AnchorTarget(
+			features_shape=keras.backend.int_shape(cls)[1:3],
+			stride=stride,
+			anchor_size=size,
+			name='boxes_{}'.format(i)
+		)([im_info, gt_boxes])
+        anchors           = a if anchors == None else keras.layers.Concatenate(axis=1)([anchors, a])
+        labels            = lb if labels == None else keras.layers.Concatenate(axis=1)([labels, lb])
+        # regression_target = r if regression_target == None else keras.layers.Concatenate(axis=1)([regression_target, r])
 
-        cls = Reshape((-1, num_classes), name='classification_{}'.format(i))(cls)
-        classification = cls if classification == None else Concatenate(axis=1)([classification, cls])
+        cls            = keras.layers.Reshape((-1, num_classes), name='classification_{}'.format(i))(cls)
+        classification = cls if classification == None else keras.layers.Concatenate(axis=1)([classification, cls])
 
         # run the regression subnet
-        reg = p
-        for l in regression_layers:
-            reg = l(reg)
+		#reg = p
+		#for l in regression_layers:
+		#	reg = l(reg)
 
-        reg = Reshape((-1, 4), name='boxes_reshaped_{}'.format(i))(reg)
-        regression = reg if regression == None else Concatenate(axis=1)([regression, reg])
+		#reg        = keras.layers.Reshape((-1, 4), name='boxes_reshaped_{}'.format(i))(reg)
+		#regression = reg if regression == None else keras.layers.Concatenate(axis=1)([regression, reg])
 
-    # TODO: Apply loss on classification / regression
-    return Model(inputs=inputs, outputs=[classification, regression], *args, **kwargs)
+	# compute classification and regression losses
+    classification = keras.layers.Activation('softmax', name='classification_softmax')(classification)
+    cls_loss = FocalLoss(num_classes=num_classes)([classification, labels])
+
+    return keras.models.Model(inputs=inputs, outputs=[classification, labels, cls_loss, anchors], *args, **kwargs)
 
 def ResNet50RetinaNet(inputs, *args, **kwargs):
     image, _, _ = inputs
