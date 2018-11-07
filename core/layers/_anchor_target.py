@@ -44,10 +44,9 @@ class AnchorTarget(keras.layers.Layer):
 		super(AnchorTarget,self).__init__(*args, **kwargs)
 
 	def call(self, inputs, **kwargs):
-		im_info, gt_boxes = inputs
+		image_shape, gt_boxes = inputs
 
 		# TODO: Fix usage of batch index
-		image_shape = im_info[0, :2]
 
 		# TODO: Fix usage of batch index
 		gt_boxes = gt_boxes[0]
@@ -91,14 +90,14 @@ class AnchorTarget(keras.layers.Layer):
 		bbox_reg_targets = core.backend.bbox_transform(anchors, gt_boxes)
 
 		# filter out anchors that are outside the image
-		labels = core.backend.where(
-			(anchors[:, 0] >= -self.allowed_border) &
-			(anchors[:, 1] >= -self.allowed_border) &
-			(anchors[:, 2] < self.allowed_border + image_shape[1]) & # width
-			(anchors[:, 3] < self.allowed_border + image_shape[0]),  # height
-			labels,
-			negatives
-		)
+		# labels = core.backend.where(
+		# 	(anchors[:, 0] >= -self.allowed_border) &
+		# 	(anchors[:, 1] >= -self.allowed_border) &
+		# 	(anchors[:, 2] < self.allowed_border + image_shape[1]) & # width
+		# 	(anchors[:, 3] < self.allowed_border + image_shape[0]),  # height
+		# 	labels,
+		# 	negatives
+		# )
 
 		# select correct label from gt_boxes
 		labels = core.backend.where(keras.backend.equal(labels, 1), gt_boxes[:, 4], labels)

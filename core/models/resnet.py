@@ -14,6 +14,7 @@ from keras.layers import Conv2D, Conv2DTranspose, Add, Activation, Reshape, Conc
 
 import keras
 
+import core
 from core.layers import AnchorTarget, FocalLoss
 import math
 import  numpy as np
@@ -90,8 +91,9 @@ def compute_pyramid_features(res3, res4, res5, feature_size=256):
 
     return P3, P4, P5, P6, P7
 
-def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwargs):
-    image, im_info, gt_boxes = inputs
+def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, weights='imagenet', *args, **kwargs):
+    image, gt_boxes = inputs
+    image_shape = keras.layers.Lambda(lambda x: keras.backend.cast(keras.backend.shape(x)[1:3], keras.backend.floatx()))(image)
     num_anchors = 9
     _, res3, res4, res5 = backbone.outputs # ignore res2
 
@@ -123,7 +125,7 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
 			stride=stride,
 			anchor_size=size,
 			name='boxes_{}'.format(i)
-		)([im_info, gt_boxes])
+		)([image_shape, gt_boxes])
         anchors           = a if anchors == None else keras.layers.Concatenate(axis=1)([anchors, a])
         labels            = lb if labels == None else keras.layers.Concatenate(axis=1)([labels, lb])
         regression_target = r if regression_target == None else keras.layers.Concatenate(axis=1)([regression_target, r])
@@ -143,10 +145,30 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
     classification      = keras.layers.Activation('softmax', name='classification_softmax')(classification)
     cls_loss, reg_loss  = FocalLoss(num_classes=num_classes, name='focal_loss')([classification, labels, regression, regression_target])
 
-    return keras.models.Model(inputs=inputs, outputs=[classification, regression, labels, cls_loss, reg_loss, anchors], *args, **kwargs)
+    # compute resulting boxes
+    boxes = keras.layers.Lambda(lambda x: core.backend.bbox_transform_inv(x[0], x[1]), name='boxes')(
+        [anchors, regression])
+
+    # construct the model
+    model = keras.models.Model(inputs=inputs, outputs=[classification, boxes, labels, cls_loss, reg_loss, anchors],
+                               *args, **kwargs)
+
+    # load pretrained imagenet weights?
+    if weights == 'imagenet':
+        weights_path = keras.applications.imagenet_utils.get_file(
+            'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5', WEIGHTS_PATH_NO_TOP, cache_subdir='models',
+            md5_hash='a268eb855778b3df3c7506639542a6af')
+    else:
+        weights_path = weights
+
+    # if set, load pretrained weights
+    if weights_path:
+        model.load_weights(weights_path, by_name=True)
+
+    return model
 
 def ResNet50RetinaNet(inputs, *args, **kwargs):
-    image, _, _ = inputs
+    image, _ = inputs
     resnet = keras_resnet.models.ResNet50(image, include_top=False)
 
     retinanet = RetinaNet(inputs, resnet, *args, **kwargs)
