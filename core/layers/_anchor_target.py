@@ -59,9 +59,9 @@ class AnchorTarget(keras.layers.Layer):
 		anchors = core.backend.shift(self.features_shape, self.stride, anchors)
 
 		# label: 1 is positive, 0 is negative, -1 is dont care
-		ones      = keras.backend.ones((total_anchors,), dtype=keras.backend.floatx())
-		zeros     = keras.backend.zeros((total_anchors,), dtype=keras.backend.floatx())
-		negatives = ones * -1
+		foreground      = keras.backend.ones((total_anchors,), dtype=keras.backend.floatx())
+		background     = keras.backend.zeros((total_anchors,), dtype=keras.backend.floatx())
+		negatives = foreground * -1
 		labels    = negatives
 
 		# 2. obtain indices of gt boxes with the greatest overlap, balanced labels
@@ -69,7 +69,7 @@ class AnchorTarget(keras.layers.Layer):
 
 		if not self.clobber_positives:
 			# assign bg labels first so that positive labels can clobber them
-			labels = core.backend.where(keras.backend.less(max_overlaps, self.negative_overlap), zeros, labels)
+			labels = core.backend.where(keras.backend.less(max_overlaps, self.negative_overlap), foreground, labels)
 
 		# fg label: for each gt, anchor with highest overlap
 		# generate a marker to identify where updates should be done
@@ -77,14 +77,14 @@ class AnchorTarget(keras.layers.Layer):
 		# scatter_nd marker array to labels array shape
 		#update_mask = tensorflow.scatter_nd(gt_argmax_overlaps_inds, marker, labels.shape)
 		# update labels accordingly
-		#labels = core.backend.where(keras.backend.equal(update_mask, 1), ones, labels)
+		#labels = core.backend.where(keras.backend.equal(update_mask, 1), foreground, labels)
 
 		# fg label: above threshold IOU
-		labels = core.backend.where(keras.backend.greater_equal(max_overlaps, self.positive_overlap), ones, labels)
+		labels = core.backend.where(keras.backend.greater_equal(max_overlaps, self.positive_overlap), foreground, labels)
 
 		if self.clobber_positives:
 			# assign bg labels last so that negative labels can clobber positives
-			labels = core.backend.where(keras.backend.less(max_overlaps, self.negative_overlap), zeros, labels)
+			labels = core.backend.where(keras.backend.less(max_overlaps, self.negative_overlap), background, labels)
 
 		# compute box regression targets
 		gt_boxes         = keras.backend.gather(gt_boxes, argmax_overlaps_inds)

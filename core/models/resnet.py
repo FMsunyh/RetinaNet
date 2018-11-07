@@ -16,6 +16,21 @@ import keras
 
 from core.layers import AnchorTarget, FocalLoss
 import math
+import  numpy as np
+
+def prior_probability(num_classes=21, probability=0.1):
+	def f(shape, dtype=keras.backend.floatx()):
+		assert(shape[0] % num_classes == 0)
+
+		# set bias to -log((1 - p)/p) for foregound
+		result = np.ones(shape, dtype=dtype) * -math.log((1 - probability) / probability)
+
+		# set bias to -log(p/(1 - p)) for background
+		result[::num_classes] = -math.log(probability / (1 - probability))
+
+		return result
+
+	return f
 
 def classification_subnet(num_classes=21, num_anchors=9, feature_size=256, prob_pi=0.01):
     options = {
@@ -28,7 +43,7 @@ def classification_subnet(num_classes=21, num_anchors=9, feature_size=256, prob_
         layers.append(Conv2D(feature_size,(3,3),strides=1,padding='same', activation='relu',name='cls_{}'.format(i), **options))
     layers.append(Conv2D(num_classes*num_anchors,(3,3),strides=1,padding='same',name='pyramid_classification'
                          ,kernel_initializer=keras.initializers.zeros()
-                         ,bias_initializer=keras.initializers.constant(-math.log((1 - prob_pi) / prob_pi))
+                         ,bias_initializer=prior_probability(num_classes=num_classes, probability=prob_pi)
                          ))
 
     return layers
@@ -82,11 +97,6 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
     pyramid_features = compute_pyramid_features(res3, res4, res5)
     strides          = [8,  16,  32,  64, 128]
     sizes            = [32, 64, 128, 256, 512]
-
-    # TODO: Remove this ... this skips the first pyramid level
-    pyramid_features = pyramid_features[1:]
-    strides = [16, 32, 64, 128]
-    sizes = [64, 128, 256, 512]
 
     # construct classification and regression subnets
     classification_layers = classification_subnet(num_classes=num_classes, num_anchors=num_anchors,feature_size=feature_size)
