@@ -1,37 +1,37 @@
 import keras.backend
 import core.backend
 
-def inside_image(boxes, im_info, allowed_border=0):
-	"""
-	Calc indices of boxes which are located completely inside of the image
-	whose size is specified by img_info ((height, width, scale)-shaped array).
-
-	:param boxes: (None, 4) tensor containing boxes in original image (x1, y1, x2, y2)
-	:param img_info: (height, width, scale)
-	:param allowed_border: allow boxes to be outside the image by allowed_border pixels
-	:return: (None, 4) indices of boxes completely in original image, (None, 4) tensor of boxes completely inside image
-	"""
-
-	indices = core.backend.where(
-		(boxes[:, 0] >= -allowed_border) &
-		(boxes[:, 1] >= -allowed_border) &
-		(boxes[:, 2] < allowed_border + im_info[1]) & # width
-		(boxes[:, 3] < allowed_border + im_info[0])   # height
-	)
-
-	indices = keras.backend.cast(indices, 'int32')
-
-	gathered = keras.backend.gather(boxes, indices)
-
-	return indices[:, 0], keras.backend.reshape(gathered, [-1, 4])
+# def inside_image(boxes, im_info, allowed_border=0):
+# 	"""
+# 	Calc indices of boxes which are located completely inside of the image
+# 	whose size is specified by img_info ((height, width, scale)-shaped array).
+#
+# 	:param boxes: (None, 4) tensor containing boxes in original image (x1, y1, x2, y2)
+# 	:param img_info: (height, width, scale)
+# 	:param allowed_border: allow boxes to be outside the image by allowed_border pixels
+# 	:return: (None, 4) indices of boxes completely in original image, (None, 4) tensor of boxes completely inside image
+# 	"""
+#
+# 	indices = core.backend.where(
+# 		(boxes[:, 0] >= -allowed_border) &
+# 		(boxes[:, 1] >= -allowed_border) &
+# 		(boxes[:, 2] < allowed_border + im_info[1]) & # width
+# 		(boxes[:, 3] < allowed_border + im_info[0])   # height
+# 	)
+#
+# 	indices = keras.backend.cast(indices, 'int32')
+#
+# 	gathered = keras.backend.gather(boxes, indices)
+#
+# 	return indices[:, 0], keras.backend.reshape(gathered, [-1, 4])
 
 
 def shift(shape, stride, anchors):
 	"""
 	Produce shifted anchors based on shape of the map and stride size
 	"""
-	shift_x = keras.backend.arange(0, shape[0]) * stride
-	shift_y = keras.backend.arange(0, shape[1]) * stride
+	shift_x = keras.backend.arange(0, shape[1]) * stride
+	shift_y = keras.backend.arange(0, shape[0]) * stride
 
 	shift_x, shift_y = core.backend.meshgrid(shift_x, shift_y)
 	shift_x = keras.backend.reshape(shift_x, [-1])

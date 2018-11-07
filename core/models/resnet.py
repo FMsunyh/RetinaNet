@@ -18,6 +18,8 @@ from core.layers import AnchorTarget, FocalLoss
 import math
 import  numpy as np
 
+WEIGHTS_PATH_NO_TOP = 'https://github.com/fchollet/deep-learning-models/releases/download/v0.2/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5'
+
 def prior_probability(num_classes=21, probability=0.1):
 	def f(shape, dtype=keras.backend.floatx()):
 		assert(shape[0] % num_classes == 0)
@@ -100,7 +102,7 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
 
     # construct classification and regression subnets
     classification_layers = classification_subnet(num_classes=num_classes, num_anchors=num_anchors,feature_size=feature_size)
-    # regression_layers     = regression_subnet(num_anchors=num_anchors, feature_size=feature_size)
+    regression_layers     = regression_subnet(num_anchors=num_anchors, feature_size=feature_size)
 
     # for all pyramid levels, run classification and regression branch and compute anchors
     classification    = None
@@ -116,7 +118,7 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
             cls = l(cls)
 
         # compute labels and bbox_reg_targets
-        lb, _, a          = AnchorTarget(
+        lb, r, a          = AnchorTarget(
 			features_shape=keras.backend.int_shape(cls)[1:3],
 			stride=stride,
 			anchor_size=size,
@@ -124,24 +126,24 @@ def RetinaNet(inputs, backbone, num_classes=21, feature_size=256, *args, **kwarg
 		)([im_info, gt_boxes])
         anchors           = a if anchors == None else keras.layers.Concatenate(axis=1)([anchors, a])
         labels            = lb if labels == None else keras.layers.Concatenate(axis=1)([labels, lb])
-        # regression_target = r if regression_target == None else keras.layers.Concatenate(axis=1)([regression_target, r])
+        regression_target = r if regression_target == None else keras.layers.Concatenate(axis=1)([regression_target, r])
 
         cls            = keras.layers.Reshape((-1, num_classes), name='classification_{}'.format(i))(cls)
         classification = cls if classification == None else keras.layers.Concatenate(axis=1)([classification, cls])
 
         # run the regression subnet
-		#reg = p
-		#for l in regression_layers:
-		#	reg = l(reg)
+        reg = p
+        for l in regression_layers:
+            reg = l(reg)
 
-		#reg        = keras.layers.Reshape((-1, 4), name='boxes_reshaped_{}'.format(i))(reg)
-		#regression = reg if regression == None else keras.layers.Concatenate(axis=1)([regression, reg])
+        reg = keras.layers.Reshape((-1, 4), name='boxes_reshaped_{}'.format(i))(reg)
+        regression = reg if regression == None else keras.layers.Concatenate(axis=1)([regression, reg])
 
-	# compute classification and regression losses
-    classification = keras.layers.Activation('softmax', name='classification_softmax')(classification)
-    cls_loss = FocalLoss(num_classes=num_classes)([classification, labels])
+    # compute classification and regression losses
+    classification      = keras.layers.Activation('softmax', name='classification_softmax')(classification)
+    cls_loss, reg_loss  = FocalLoss(num_classes=num_classes, name='focal_loss')([classification, labels, regression, regression_target])
 
-    return keras.models.Model(inputs=inputs, outputs=[classification, labels, cls_loss, anchors], *args, **kwargs)
+    return keras.models.Model(inputs=inputs, outputs=[classification, regression, labels, cls_loss, reg_loss, anchors], *args, **kwargs)
 
 def ResNet50RetinaNet(inputs, *args, **kwargs):
     image, _, _ = inputs
